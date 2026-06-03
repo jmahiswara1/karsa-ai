@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Any
 from app.core.security import verify_service_token
+import app.core.ai_client as ai_client
 
 router = APIRouter(dependencies=[Depends(verify_service_token)])
 
@@ -19,15 +20,24 @@ class PlannerRequest(BaseModel):
 
 @router.post("/capture/extract")
 async def extract_capture(request: CaptureRequest):
-    # Placeholder for Phase 3
-    return {"success": True, "message": "Extracted", "data": {}}
+    try:
+        data = await ai_client.extract_task_from_text(request.raw_input)
+        return {"success": True, "message": "Extracted successfully", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/priority/suggest")
 async def suggest_priority(request: PriorityRequest):
-    # Placeholder for Phase 3
-    return {"success": True, "message": "Priority suggested", "data": {}}
+    try:
+        data = await ai_client.suggest_priorities(request.tasks, request.projects)
+        return {"success": True, "message": "Priority suggested successfully", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/planner/generate")
 async def generate_planner(request: PlannerRequest):
-    # Placeholder for Phase 3
-    return {"success": True, "message": "Planner generated", "data": {}}
+    try:
+        data = await ai_client.generate_daily_plan(request.energy_level, request.mood, request.tasks)
+        return {"success": True, "message": "Planner generated successfully", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
