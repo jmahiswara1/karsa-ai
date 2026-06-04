@@ -104,3 +104,30 @@ async def generate_daily_plan(energy_level: str, mood: str, tasks: list[dict]) -
     
     response = await get_chat_completion(messages, response_format={"type": "json_object"})
     return parse_json_response(response.content)
+
+async def assistant_chat(prompt: str, context: dict) -> dict:
+    system_prompt = """
+    You are Karsa, a calm and helpful personal productivity assistant.
+    You communicate naturally with the user, but you also have the ability to structure tasks or suggest priorities if asked.
+    
+    You will receive the user's prompt and a context containing their current active tasks and projects.
+    
+    If the user asks to prioritize tasks, you must include 'action': 'PRIORITIZE' and fill 'action_data' with suggested task IDs.
+    If the user asks to create a task or dumps raw thoughts, you must include 'action': 'EXTRACT_TASK' and fill 'action_data' with extracted task details.
+    Otherwise, just respond naturally and set 'action' to null.
+    
+    Respond STRICTLY in JSON format with the following keys:
+    {
+        "reply": "Your natural language response to the user.",
+        "action": "PRIORITIZE | EXTRACT_TASK | null",
+        "action_data": {} // Context-specific data or null
+    }
+    """
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Context: {json.dumps(context)}\n\nUser: {prompt}"}
+    ]
+    
+    response = await get_chat_completion(messages, response_format={"type": "json_object"})
+    return parse_json_response(response.content)

@@ -18,6 +18,10 @@ class PlannerRequest(BaseModel):
     mood: str
     tasks: list[dict[str, Any]]
 
+class AssistantChatRequest(BaseModel):
+    prompt: str
+    context: dict[str, Any]
+
 @router.post("/capture/extract")
 async def extract_capture(request: CaptureRequest):
     try:
@@ -39,5 +43,13 @@ async def generate_planner(request: PlannerRequest):
     try:
         data = await ai_client.generate_daily_plan(request.energy_level, request.mood, request.tasks)
         return {"success": True, "message": "Planner generated successfully", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/assistant/chat")
+async def assistant_chat(request: AssistantChatRequest):
+    try:
+        data = await ai_client.assistant_chat(request.prompt, request.context)
+        return {"success": True, "message": "Chat completed", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
