@@ -80,28 +80,38 @@ async def suggest_priorities(tasks: list[dict], projects: list[dict]) -> dict:
 
 async def generate_daily_plan(energy_level: str, mood: str, tasks: list[dict]) -> dict:
     prompt = f"""
-    You are an AI daily planner. Create a daily plan based on the user's current state.
+    You are an AI daily planner for a calm productivity app. Create a time-blocked daily schedule.
     Energy Level: {energy_level}
     Mood: {mood}
     Available Tasks: {json.dumps(tasks)}
-    
-    Select a realistic set of tasks from the available list that fits their current energy and mood.
-    If energy is low, suggest easier tasks.
-    
-    Respond STRICTLY in JSON format with the following keys:
+
+    Create a realistic schedule with time blocks starting from a reasonable morning hour.
+    - Low energy: start later (9:00), shorter blocks (30-45 min), more breaks.
+    - Medium energy: start at 8:00, normal blocks (45-60 min).
+    - High energy: start at 7:00, longer blocks (60-90 min), tackle hardest tasks first.
+    - Include short breaks between focus sessions.
+    - Every task given must appear in a block with its task_id.
+    - End by a reasonable time based on energy and total task load.
+    - Include a calm, encouraging focus_message.
+    - Set workload_level: LOW (3 or fewer blocks), MEDIUM (4-6 blocks), HIGH (7+ blocks).
+
+    Respond STRICTLY in JSON format:
     {{
-        "focus_message": "A short, encouraging message tailored to their mood.",
-        "planned_task_ids": ["id1", "id2"],
-        "estimated_total_minutes": 120
+        "focus_message": "A warm, encouraging sentence tailored to their mood and energy.",
+        "blocks": [
+            {{"task_id": "task-uuid", "title": "Task name", "start_time": "08:00", "end_time": "09:00", "reason": "Short motivation for this placement"}},
+            {{"task_id": null, "title": "Short Break", "start_time": "09:00", "end_time": "09:15", "reason": "Recharge"}}
+        ],
+        "workload_level": "MEDIUM"
     }}
     Do not include any other text.
     """
-    
+
     messages = [
         {"role": "system", "content": "You are a daily planning assistant that outputs only valid JSON."},
         {"role": "user", "content": prompt}
     ]
-    
+
     response = await get_chat_completion(messages, response_format={"type": "json_object"})
     return parse_json_response(response.content)
 
