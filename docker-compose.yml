@@ -1,0 +1,16 @@
+services:
+  ai-karsa:
+    build: .
+    container_name: karsa_ai
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      SUMOPOD_BASE_URL: ${SUMOPOD_BASE_URL:-https://ai.sumopod.com/v1}
+    networks: [karsa_network]
+
+networks:
+  karsa_network:
+    external: true
