@@ -78,9 +78,16 @@ async def suggest_priorities(tasks: list[dict], projects: list[dict]) -> dict:
     response = await get_chat_completion(messages, response_format={"type": "json_object"})
     return parse_json_response(response.content)
 
-async def generate_daily_plan(energy_level: str, mood: str, tasks: list[dict]) -> dict:
+async def generate_plan(energy_level: str, mood: str, tasks: list[dict], start_date: str = None, end_date: str = None) -> dict:
+    date_context = "Create a time-blocked daily schedule for today."
+    block_format = '{"task_id": "task-uuid", "title": "Task name", "start_time": "08:00", "end_time": "09:00", "reason": "Short motivation"}'
+    
+    if start_date and end_date:
+        date_context = f"Create a time-blocked schedule spanning from {start_date} to {end_date}."
+        block_format = '{"date": "YYYY-MM-DD", "task_id": "task-uuid", "title": "Task name", "start_time": "08:00", "end_time": "09:00", "reason": "Short motivation"}'
+
     prompt = f"""
-    You are an AI daily planner for a calm productivity app. Create a time-blocked daily schedule.
+    You are an AI planner for a calm productivity app. {date_context}
     Energy Level: {energy_level}
     Mood: {mood}
     Available Tasks: {json.dumps(tasks)}
@@ -93,14 +100,14 @@ async def generate_daily_plan(energy_level: str, mood: str, tasks: list[dict]) -
     - Every task given must appear in a block with its task_id.
     - End by a reasonable time based on energy and total task load.
     - Include a calm, encouraging focus_message.
-    - Set workload_level: LOW (3 or fewer blocks), MEDIUM (4-6 blocks), HIGH (7+ blocks).
+    - Set workload_level: LOW (3 or fewer blocks per day), MEDIUM (4-6 blocks per day), HIGH (7+ blocks per day).
 
     Respond STRICTLY in JSON format:
     {{
         "focus_message": "A warm, encouraging sentence tailored to their mood and energy.",
         "blocks": [
-            {{"task_id": "task-uuid", "title": "Task name", "start_time": "08:00", "end_time": "09:00", "reason": "Short motivation for this placement"}},
-            {{"task_id": null, "title": "Short Break", "start_time": "09:00", "end_time": "09:15", "reason": "Recharge"}}
+            {block_format},
+            {block_format.replace('"task-uuid"', 'null').replace('Task name', 'Short Break')}
         ],
         "workload_level": "MEDIUM"
     }}

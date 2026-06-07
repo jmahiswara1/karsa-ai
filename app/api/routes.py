@@ -17,6 +17,8 @@ class PlannerRequest(BaseModel):
     energy_level: str
     mood: str
     tasks: list[dict[str, Any]]
+    start_date: str | None = None
+    end_date: str | None = None
 
 class AssistantChatRequest(BaseModel):
     prompt: str
@@ -41,7 +43,7 @@ async def suggest_priority(request: PriorityRequest):
 @router.post("/planner/generate")
 async def generate_planner(request: PlannerRequest):
     try:
-        data = await ai_client.generate_daily_plan(request.energy_level, request.mood, request.tasks)
+        data = await ai_client.generate_plan(request.energy_level, request.mood, request.tasks, request.start_date, request.end_date)
         return {"success": True, "message": "Planner generated successfully", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
