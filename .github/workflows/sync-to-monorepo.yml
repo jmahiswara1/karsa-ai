@@ -1,0 +1,43 @@
+name: Sync to Monorepo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare staging directory
+        run: |
+          rsync -a \
+            --exclude='.github' \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.venv' \
+            --exclude='venv' \
+            --exclude='.env' \
+            --exclude='.env.local' \
+            ./ ./staging/
+
+      - name: Push to Karsa monorepo
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        with:
+          source-directory: staging
+          destination-github-username: jmahiswara1
+          destination-repository-name: Karsa
+          target-branch: main
+          target-directory: karsa-ai
+          user-email: gadangjatumahiswara@gmail.com
+          user-name: jmahiswara1
+          create-target-branch-if-needed: true
+          commit-message: "sync: update karsa-ai from ORIGIN_COMMIT"
