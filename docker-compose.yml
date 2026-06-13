@@ -7,8 +7,22 @@ services:
       - "8000:8000"
     environment:
       AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # ── Active provider + fallback order ─────
+      ACTIVE_PROVIDER: ${ACTIVE_PROVIDER:-bai}
+      FALLBACK_ORDER: ${FALLBACK_ORDER:-bai,deepseek,sumopod}
+      # ── b.ai ────────────────────────────────
+      BAI_BASE_URL: ${BAI_BASE_URL:-https://api.b.ai/v1}
+      BAI_API_KEY: ${BAI_API_KEY:-}
+      BAI_MODEL: ${BAI_MODEL:-DeepSeek-V4-Pro}
+      # ── DeepSeek ────────────────────────────
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-DeepSeek-V4-Pro}
+      # ── Sumopod ─────────────────────────────
       SUMOPOD_BASE_URL: ${SUMOPOD_BASE_URL:-https://ai.sumopod.com/v1}
+      SUMOPOD_API_KEY: ${SUMOPOD_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}        # legacy alias for sumopod
+      SUMOPOD_MODEL: ${SUMOPOD_MODEL:-gpt-4o-mini}
     networks: [karsa_network]
 
 networks:

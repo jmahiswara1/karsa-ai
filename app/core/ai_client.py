@@ -1,42 +1,138 @@
+"""Async LLM client dengan auto-fallback antar provider (sumopod / b.ai / deepseek)."""
 import json
 import re
-from openai import AsyncOpenAI
-from app.core.config import settings
 
-client = AsyncOpenAI(
-    api_key=settings.OPENAI_API_KEY,
-    base_url=settings.SUMOPOD_BASE_URL
+from openai import (
+    APIConnectionError,
+    APIError,
+    AsyncOpenAI,
+    OpenAIError,
+    RateLimitError,
 )
 
-async def get_chat_completion(messages: list, response_format=None):
-    kwargs = {
-        "model": settings.MODEL_NAME,
-        "messages": messages,
-    }
-    if response_format:
-        kwargs["response_format"] = response_format
+from app.core.config import settings
 
-    response = await client.chat.completions.create(**kwargs)
-    return response.choices[0].message
+# Errors that justify moving on to the next provider in the fallback chain.
+RETRIABLE_ERRORS = (
+    APIConnectionError,
+    RateLimitError,
+    APIError,
+    TimeoutError,
+    ConnectionError,
+)
+
+
+async def chat(
+    messages: list[dict],
+    *,
+    provider: str | None = None,
+    fallback: list[str] | None = None,
+    response_format: dict | None = None,
+    stream: bool = False,
+    temperature: float = 0.7,
+    max_tokens: int = 1000,
+    **kwargs,
+):
+    """Kirim chat ke LLM dengan auto-fallback.
+
+    Args:
+        messages:        list pesan OpenAI format
+        provider:        provider utama (default = ACTIVE_PROVIDER dari .env)
+        fallback:        override urutan fallback (default = FALLBACK_ORDER)
+        response_format: mis. {"type": "json_object"} untuk mode JSON
+        stream:          True untuk stream response
+        temperature,
+        max_tokens,
+        **kwargs:        parameter lain yang diteruskan ke API
+
+    Returns:
+        - non-stream: `response.choices[0].message` (object dengan atribut `.content`)
+        - stream: async iterator dari chunks
+
+    Raises:
+        ValueError: kalau nama provider tak dikenal atau API key kosong
+        RuntimeError: kalau semua provider di chain gagal (network/rate limit)
+    """
+    primary = (provider or settings.ACTIVE_PROVIDER).lower()
+    fb_list = fallback if fallback is not None else settings.FALLBACK_ORDER
+    chain = [primary] + [p for p in fb_list if p.lower() != primary]
+
+    last_error: Exception | None = None
+
+    for p in chain:
+        try:
+            cfg = settings.provider(p)
+            if not cfg["api_key"]:
+                # Config error: skip this provider but keep going through the chain.
+                # If it's the only one configured, the runtime error at the end
+                # will surface the real problem.
+                print(f"  ✗ [{p}] API key belum di-set, lewati.")
+                last_error = ValueError(f"API key untuk provider '{p}' kosong")
+                continue
+
+            client = AsyncOpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
+            print(f"  → [{p}] {cfg['name']} ({cfg['model']})")
+
+            call_kwargs: dict = {
+                "model": cfg["model"],
+                "messages": messages,
+                "stream": stream,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                **kwargs,
+            }
+            if response_format:
+                call_kwargs["response_format"] = response_format
+
+            response = await client.chat.completions.create(**call_kwargs)
+
+            if stream:
+                return response
+            return response.choices[0].message
+
+        except ValueError as e:
+            # Provider name tak dikenal. Fatal: tidak ada gunanya fallback.
+            raise
+
+        except RETRIABLE_ERRORS as e:
+            print(f"  ✗ [{p}] gagal: {type(e).__name__}: {e}")
+            last_error = e
+            continue
+
+        except OpenAIError as e:
+            # OpenAI error non-retriable (bad request, auth, dll). Fatal.
+            print(f"  ✗ [{p}] OpenAI error (fatal): {e}")
+            raise
+
+    raise RuntimeError(
+        f"Semua provider gagal. Terakhir: {type(last_error).__name__}: {last_error}"
+    ) from last_error
+
+
+# ── JSON helper (dipakai semua endpoint) ─────────────────────
 
 def parse_json_response(content: str) -> dict:
-    # Try to find JSON block if the model wrapped it in markdown
-    match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+    """Parse JSON dari response LLM. Tangani ```json ... ``` wrapper."""
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
     if match:
         content = match.group(1)
-    
     try:
         return json.loads(content)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse AI response as JSON: {e}\nRaw content: {content}")
+        raise ValueError(
+            f"Failed to parse AI response as JSON: {e}\nRaw content: {content}"
+        )
+
+
+# ── Endpoint helpers (signature tidak berubah) ────────────────
 
 async def extract_task_from_text(raw_input: str) -> dict:
     prompt = f"""
     You are an AI assistant for a productivity app. Your task is to extract task information from the following raw text input.
     Extract the 'title', 'description' (if any), 'priority' (enum: LOW, MEDIUM, HIGH, URGENT - default to MEDIUM if not specified), and 'tags' (array of strings).
-    
+
     Raw input: "{raw_input}"
-    
+
     Respond STRICTLY in JSON format with the following keys:
     {{
         "title": "string",
@@ -46,22 +142,26 @@ async def extract_task_from_text(raw_input: str) -> dict:
     }}
     Do not include any other text, only the JSON block.
     """
-    
+
     messages = [
         {"role": "system", "content": "You are a helpful data extraction assistant that outputs only valid JSON."},
-        {"role": "user", "content": prompt}
+        {"role": "user", "content": prompt},
     ]
-    
-    response = await get_chat_completion(messages, response_format={"type": "json_object"})
-    return parse_json_response(response.content)
+
+    message = await chat(
+        messages,
+        response_format={"type": "json_object"},
+    )
+    return parse_json_response(message.content)
+
 
 async def suggest_priorities(tasks: list[dict], projects: list[dict]) -> dict:
     prompt = f"""
     You are an AI priority advisor. Analyze the following tasks and projects, and suggest the top 3 tasks to focus on right now.
-    
+
     Tasks: {json.dumps(tasks)}
     Projects: {json.dumps(projects)}
-    
+
     Respond STRICTLY in JSON format with the following keys:
     {{
         "suggested_task_ids": ["id1", "id2", "id3"],
@@ -69,19 +169,29 @@ async def suggest_priorities(tasks: list[dict], projects: list[dict]) -> dict:
     }}
     Do not include any other text.
     """
-    
+
     messages = [
         {"role": "system", "content": "You are a productivity assistant that outputs only valid JSON."},
-        {"role": "user", "content": prompt}
+        {"role": "user", "content": prompt},
     ]
-    
-    response = await get_chat_completion(messages, response_format={"type": "json_object"})
-    return parse_json_response(response.content)
 
-async def generate_plan(energy_level: str, mood: str, tasks: list[dict], start_date: str = None, end_date: str = None) -> dict:
+    message = await chat(
+        messages,
+        response_format={"type": "json_object"},
+    )
+    return parse_json_response(message.content)
+
+
+async def generate_plan(
+    energy_level: str,
+    mood: str,
+    tasks: list[dict],
+    start_date: str = None,
+    end_date: str = None,
+) -> dict:
     date_context = "Create a time-blocked daily schedule for today."
     block_format = '{"task_id": "task-uuid", "title": "Task name", "start_time": "08:00", "end_time": "09:00", "reason": "Short motivation"}'
-    
+
     if start_date and end_date:
         date_context = f"Create a time-blocked schedule spanning from {start_date} to {end_date}."
         block_format = '{"date": "YYYY-MM-DD", "task_id": "task-uuid", "title": "Task name", "start_time": "08:00", "end_time": "09:00", "reason": "Short motivation"}'
@@ -116,23 +226,27 @@ async def generate_plan(energy_level: str, mood: str, tasks: list[dict], start_d
 
     messages = [
         {"role": "system", "content": "You are a daily planning assistant that outputs only valid JSON."},
-        {"role": "user", "content": prompt}
+        {"role": "user", "content": prompt},
     ]
 
-    response = await get_chat_completion(messages, response_format={"type": "json_object"})
-    return parse_json_response(response.content)
+    message = await chat(
+        messages,
+        response_format={"type": "json_object"},
+    )
+    return parse_json_response(message.content)
+
 
 async def assistant_chat(prompt: str, context: dict) -> dict:
     system_prompt = """
     You are Karsa, a calm and helpful personal productivity assistant.
     You communicate naturally with the user, but you also have the ability to structure tasks or suggest priorities if asked.
-    
+
     You will receive the user's prompt and a context containing their current active tasks and projects.
-    
+
     If the user asks to prioritize tasks, you must include 'action': 'PRIORITIZE' and fill 'action_data' with suggested task IDs.
     If the user asks to create a task or dumps raw thoughts, you must include 'action': 'EXTRACT_TASK' and fill 'action_data' with extracted task details.
     Otherwise, just respond naturally and set 'action' to null.
-    
+
     Respond STRICTLY in JSON format with the following keys:
     {
         "reply": "Your natural language response to the user.",
@@ -140,11 +254,14 @@ async def assistant_chat(prompt: str, context: dict) -> dict:
         "action_data": {} // Context-specific data or null
     }
     """
-    
+
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Context: {json.dumps(context)}\n\nUser: {prompt}"}
+        {"role": "user", "content": f"Context: {json.dumps(context)}\n\nUser: {prompt}"},
     ]
-    
-    response = await get_chat_completion(messages, response_format={"type": "json_object"})
-    return parse_json_response(response.content)
+
+    message = await chat(
+        messages,
+        response_format={"type": "json_object"},
+    )
+    return parse_json_response(message.content)
