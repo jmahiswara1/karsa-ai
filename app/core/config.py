@@ -20,68 +20,87 @@ class Settings(BaseSettings):
 
     # ── Active provider + fallback order ─────────────
     # ACTIVE_PROVIDER is tried first; if it fails the loop walks FALLBACK_ORDER.
-    ACTIVE_PROVIDER: str = "sumopod"
+    ACTIVE_PROVIDER: str = ""
     FALLBACK_ORDER: list[str] = []
 
-    # ── Sumopod (primary) ────────────────────────────
-    SUMOPOD_BASE_URL: str = "https://ai.sumopod.com/v1"
+    # ── Sumopod ──────────────────────────────────────
+    SUMOPOD_BASE_URL: str = ""
     SUMOPOD_API_KEY: str = ""
     # Backward-compat alias: older configs used OPENAI_API_KEY for sumopod.
     OPENAI_API_KEY: str = ""
-    SUMOPOD_MODEL: str = "gpt-4o-mini"
+    SUMOPOD_MODEL: str = ""
     SUMOPOD_FALLBACK_MODEL: str = ""
     # Backward-compat alias: older code referenced MODEL_NAME.
     MODEL_NAME: str = ""
 
-    # ── DeepSeek (direct) ───────────────────────────
-    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+    # ── DeepSeek ─────────────────────────────────────
+    DEEPSEEK_BASE_URL: str = ""
     DEEPSEEK_API_KEY: str = ""
-    DEEPSEEK_MODEL: str = "DeepSeek-V4-Pro"
+    DEEPSEEK_MODEL: str = ""
+    DEEPSEEK_FALLBACK_MODEL: str = ""
 
     # ── b.ai ─────────────────────────────────────────
-    BAI_BASE_URL: str = "https://api.b.ai/v1"
+    BAI_BASE_URL: str = ""
     BAI_API_KEY: str = ""
-    BAI_MODEL: str = "DeepSeek-V4-Pro"
+    BAI_MODEL: str = ""
+    BAI_FALLBACK_MODEL: str = ""
+
+    # ── Error handling ─────────────────────────────
+    # Comma-separated patterns to detect auth errors (treated as retriable).
+    AUTH_ERROR_PATTERNS: list[str] = []
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     def model_post_init(self, _ctx) -> None:
-        # Resolve aliases so downstream code can rely on a single name per provider.
+        # Resolve aliases
         if not self.SUMOPOD_API_KEY and self.OPENAI_API_KEY:
             self.SUMOPOD_API_KEY = self.OPENAI_API_KEY
         if not self.MODEL_NAME:
             self.MODEL_NAME = self.SUMOPOD_MODEL
+
+        # Defaults (derived from env vars, not hardcoded)
+        if not self.ACTIVE_PROVIDER:
+            self.ACTIVE_PROVIDER = _PROVIDER_KEYS[0]
         if not self.FALLBACK_ORDER:
-            self.FALLBACK_ORDER = _csv("FALLBACK_ORDER", "sumopod,deepseek,bai")
+            self.FALLBACK_ORDER = _csv("FALLBACK_ORDER", ",".join(_PROVIDER_KEYS))
+        if not self.AUTH_ERROR_PATTERNS:
+            self.AUTH_ERROR_PATTERNS = _csv(
+                "AUTH_ERROR_PATTERNS", "authentication,invalid_api_key,permission"
+            )
 
     # ── Provider registry (computed at access time) ──
     def provider(self, name: str) -> dict[str, str]:
-        """Return base_url / api_key / model / display_name for a provider."""
+        """Return base_url / api_key / model / fallback_model / display_name for a provider."""
         n = name.lower()
-        if n == "bai":
-            return {
-                "name": "b.ai",
-                "base_url": self.BAI_BASE_URL,
-                "api_key": self.BAI_API_KEY,
-                "model": self.BAI_MODEL,
-            }
-        if n == "deepseek":
-            return {
+        if n not in _PROVIDER_KEYS:
+            raise ValueError(
+                f"Provider '{name}' tidak dikenal. Pilihan: {list(_PROVIDER_KEYS)}"
+            )
+
+        _REGISTRY = {
+            "sumopod": {
+                "name": "Sumopod",
+                "base_url": self.SUMOPOD_BASE_URL,
+                "api_key": self.SUMOPOD_API_KEY,
+                "model": self.SUMOPOD_MODEL,
+                "fallback_model": self.SUMOPOD_FALLBACK_MODEL,
+            },
+            "deepseek": {
                 "name": "DeepSeek",
                 "base_url": self.DEEPSEEK_BASE_URL,
                 "api_key": self.DEEPSEEK_API_KEY,
                 "model": self.DEEPSEEK_MODEL,
-            }
-        if n == "sumopod":
-            return {
-                "name": "Sumopod",
-                "base_url": self.SUMOPOD_BASE_URL,
-                "api_key": self.SUMOPOD_API_KEY or self.OPENAI_API_KEY,
-                "model": self.SUMOPOD_MODEL,
-            }
-        raise ValueError(
-            f"Provider '{name}' tidak dikenal. Pilihan: {list(_PROVIDER_KEYS)}"
-        )
+                "fallback_model": self.DEEPSEEK_FALLBACK_MODEL,
+            },
+            "bai": {
+                "name": "b.ai",
+                "base_url": self.BAI_BASE_URL,
+                "api_key": self.BAI_API_KEY,
+                "model": self.BAI_MODEL,
+                "fallback_model": self.BAI_FALLBACK_MODEL,
+            },
+        }
+        return _REGISTRY[n]
 
     def known_providers(self) -> list[str]:
         return list(_PROVIDER_KEYS)

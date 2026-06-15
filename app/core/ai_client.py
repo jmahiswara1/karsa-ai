@@ -62,10 +62,10 @@ async def chat(
     for p in chain:
         cfg = settings.provider(p)
 
-        # Build model list: primary model + optional fallback model (for sumopod)
+        # Build model list: primary model + optional fallback model
         models = [cfg["model"]]
-        if p == "sumopod" and settings.SUMOPOD_FALLBACK_MODEL:
-            fb_model = settings.SUMOPOD_FALLBACK_MODEL
+        if cfg.get("fallback_model"):
+            fb_model = cfg["fallback_model"]
             if fb_model != cfg["model"]:
                 models.append(fb_model)
 
@@ -106,6 +106,14 @@ async def chat(
                 continue  # try next model in the list
 
             except OpenAIError as e:
+                # Auth error (401/403): treat as retriable across the chain
+                error_str = str(e).lower()
+                auth_patterns = settings._get_auth_patterns()
+                if any(pattern in error_str for pattern in auth_patterns):
+                    print(f"  ✗ [{tag}] auth error, coba provider/model lain: {e}")
+                    last_error = e
+                    break  # skip all models for this provider, try next provider
+                # Other OpenAI error (bad request, etc). Fatal.
                 print(f"  ✗ [{tag}] OpenAI error (fatal): {e}")
                 raise
 
