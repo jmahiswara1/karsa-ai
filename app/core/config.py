@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 # All providers in one place. To add a new provider: add an entry in
 # `provider()`, plus the env vars in docker-compose.yml, .env.example, and
 # your local .env.
-_PROVIDER_KEYS: tuple[str, ...] = ("bai", "deepseek", "sumopod")
+_PROVIDER_KEYS: tuple[str, ...] = ("sumopod", "deepseek", "bai")
 
 
 def _csv(name: str, default: str) -> list[str]:
@@ -20,27 +20,28 @@ class Settings(BaseSettings):
 
     # ── Active provider + fallback order ─────────────
     # ACTIVE_PROVIDER is tried first; if it fails the loop walks FALLBACK_ORDER.
-    ACTIVE_PROVIDER: str = "bai"
+    ACTIVE_PROVIDER: str = "sumopod"
     FALLBACK_ORDER: list[str] = []
 
-    # ── b.ai ─────────────────────────────────────────
-    BAI_BASE_URL: str = "https://api.b.ai/v1"
-    BAI_API_KEY: str = ""
-    BAI_MODEL: str = "DeepSeek-V4-Pro"
+    # ── Sumopod (primary) ────────────────────────────
+    SUMOPOD_BASE_URL: str = "https://ai.sumopod.com/v1"
+    SUMOPOD_API_KEY: str = ""
+    # Backward-compat alias: older configs used OPENAI_API_KEY for sumopod.
+    OPENAI_API_KEY: str = ""
+    SUMOPOD_MODEL: str = "gpt-4o-mini"
+    SUMOPOD_FALLBACK_MODEL: str = ""
+    # Backward-compat alias: older code referenced MODEL_NAME.
+    MODEL_NAME: str = ""
 
     # ── DeepSeek (direct) ───────────────────────────
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_MODEL: str = "DeepSeek-V4-Pro"
 
-    # ── Sumopod ──────────────────────────────────────
-    SUMOPOD_BASE_URL: str = "https://ai.sumopod.com/v1"
-    SUMOPOD_API_KEY: str = ""
-    # Backward-compat alias: older configs used OPENAI_API_KEY for sumopod.
-    OPENAI_API_KEY: str = ""
-    SUMOPOD_MODEL: str = "gpt-4o-mini"
-    # Backward-compat alias: older code referenced MODEL_NAME.
-    MODEL_NAME: str = ""
+    # ── b.ai ─────────────────────────────────────────
+    BAI_BASE_URL: str = "https://api.b.ai/v1"
+    BAI_API_KEY: str = ""
+    BAI_MODEL: str = "DeepSeek-V4-Pro"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
@@ -51,7 +52,7 @@ class Settings(BaseSettings):
         if not self.MODEL_NAME:
             self.MODEL_NAME = self.SUMOPOD_MODEL
         if not self.FALLBACK_ORDER:
-            self.FALLBACK_ORDER = _csv("FALLBACK_ORDER", "bai,deepseek,sumopod")
+            self.FALLBACK_ORDER = _csv("FALLBACK_ORDER", "sumopod,deepseek,bai")
 
     # ── Provider registry (computed at access time) ──
     def provider(self, name: str) -> dict[str, str]:

@@ -60,49 +60,54 @@ async def chat(
     last_error: Exception | None = None
 
     for p in chain:
-        try:
-            cfg = settings.provider(p)
-            if not cfg["api_key"]:
-                # Config error: skip this provider but keep going through the chain.
-                # If it's the only one configured, the runtime error at the end
-                # will surface the real problem.
-                print(f"  ✗ [{p}] API key belum di-set, lewati.")
-                last_error = ValueError(f"API key untuk provider '{p}' kosong")
-                continue
+        cfg = settings.provider(p)
 
-            client = AsyncOpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
-            print(f"  → [{p}] {cfg['name']} ({cfg['model']})")
+        # Build model list: primary model + optional fallback model (for sumopod)
+        models = [cfg["model"]]
+        if p == "sumopod" and settings.SUMOPOD_FALLBACK_MODEL:
+            fb_model = settings.SUMOPOD_FALLBACK_MODEL
+            if fb_model != cfg["model"]:
+                models.append(fb_model)
 
-            call_kwargs: dict = {
-                "model": cfg["model"],
-                "messages": messages,
-                "stream": stream,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                **kwargs,
-            }
-            if response_format:
-                call_kwargs["response_format"] = response_format
+        for i, model in enumerate(models):
+            try:
+                if not cfg["api_key"]:
+                    print(f"  ✗ [{p}] API key belum di-set, lewati.")
+                    last_error = ValueError(f"API key untuk provider '{p}' kosong")
+                    break  # break inner loop, continue to next provider
 
-            response = await client.chat.completions.create(**call_kwargs)
+                client = AsyncOpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
+                tag = f"{p}" if i == 0 else f"{p}/{model}"
+                print(f"  → [{tag}] {cfg['name']} ({model})")
 
-            if stream:
-                return response
-            return response.choices[0].message
+                call_kwargs: dict = {
+                    "model": model,
+                    "messages": messages,
+                    "stream": stream,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    **kwargs,
+                }
+                if response_format:
+                    call_kwargs["response_format"] = response_format
 
-        except ValueError as e:
-            # Provider name tak dikenal. Fatal: tidak ada gunanya fallback.
-            raise
+                response = await client.chat.completions.create(**call_kwargs)
 
-        except RETRIABLE_ERRORS as e:
-            print(f"  ✗ [{p}] gagal: {type(e).__name__}: {e}")
-            last_error = e
-            continue
+                if stream:
+                    return response
+                return response.choices[0].message
 
-        except OpenAIError as e:
-            # OpenAI error non-retriable (bad request, auth, dll). Fatal.
-            print(f"  ✗ [{p}] OpenAI error (fatal): {e}")
-            raise
+            except ValueError as e:
+                raise
+
+            except RETRIABLE_ERRORS as e:
+                print(f"  ✗ [{tag}] gagal: {type(e).__name__}: {e}")
+                last_error = e
+                continue  # try next model in the list
+
+            except OpenAIError as e:
+                print(f"  ✗ [{tag}] OpenAI error (fatal): {e}")
+                raise
 
     raise RuntimeError(
         f"Semua provider gagal. Terakhir: {type(last_error).__name__}: {last_error}"
