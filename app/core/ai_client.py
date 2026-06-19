@@ -31,6 +31,7 @@ async def chat(
     stream: bool = False,
     temperature: float = 0.7,
     max_tokens: int = 1000,
+    tools: list[dict] | None = None,
     **kwargs,
 ):
     """Kirim chat ke LLM dengan auto-fallback.
@@ -43,10 +44,11 @@ async def chat(
         stream:          True untuk stream response
         temperature,
         max_tokens,
+        tools:           list tool definitions (OpenAI function-calling format)
         **kwargs:        parameter lain yang diteruskan ke API
 
     Returns:
-        - non-stream: `response.choices[0].message` (object dengan atribut `.content`)
+        - non-stream: `response.choices[0].message` (object dengan atribut `.content` dan `.tool_calls`)
         - stream: async iterator dari chunks
 
     Raises:
@@ -90,6 +92,9 @@ async def chat(
                 }
                 if response_format:
                     call_kwargs["response_format"] = response_format
+                if tools:
+                    call_kwargs["tools"] = tools
+                    call_kwargs["tool_choice"] = "auto"
 
                 response = await client.chat.completions.create(**call_kwargs)
 

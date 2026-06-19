@@ -36,3 +36,8 @@ target-version = "py311"
 [tool.pyright]
 include = ["app"]
 typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
